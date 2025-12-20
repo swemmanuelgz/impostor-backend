@@ -1,0 +1,13 @@
+package com.swemmanuelgz.users.impostorbackend;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class ImpostorBackendApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ImpostorBackendApplication.class, args);
+    }
+
+}
