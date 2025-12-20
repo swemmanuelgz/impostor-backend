@@ -26,6 +26,9 @@ public class User {
     @Column(name = "password", nullable = false)
     private String password;
 
+    @Column(name = "full_name", length = 100)
+    private String fullName;
+
     @Column(name = "role", length = 20)
     @ColumnDefault("'USER'")
     private String role = "USER";

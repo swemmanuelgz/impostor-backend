@@ -20,6 +20,7 @@ public class UserDto {
     private String username;
     private String email;
     private String password;
+    private String fullName;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -36,6 +37,7 @@ public class UserDto {
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .fullName(user.getFullName())
                 // No exponemos password en el DTO
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
@@ -48,6 +50,7 @@ public class UserDto {
         user.setUsername(this.username);
         user.setEmail(this.email);
         user.setPassword(this.password);
+        user.setFullName(this.fullName);
         user.setCreatedAt(this.createdAt);
         user.setUpdatedAt(this.updatedAt);
         return user;

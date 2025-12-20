@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.logging.Logger;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import com.swemmanuelgz.users.impostorbackend.entity.User;
@@ -36,7 +35,7 @@ public class JwtProvider {
     @Value("${jwt.refresh.expiration}")
     private Integer jwtRefreshTokenExpirationMs;
 
-    private final ObjectProvider<UserServiceImpl> userServiceProvider;
+    private final UserServiceImpl userService;
 
     public String generateToken(User user){
         Date now = new Date(); //fecha actual
@@ -78,7 +77,7 @@ public class JwtProvider {
                 .compact(); //<- em esta lambda van los datos que llevará el token
     }
     public String generateTokenFromEmail(String email){
-        User user = userServiceProvider.getObject().findByEmail(email)
+        User user = userService.findByEmail(email)
                 .orElseThrow(() -> UserException.usuarioNoEncontradoEmail(email));
         return generateToken(user);
     }
