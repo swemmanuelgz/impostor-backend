@@ -44,4 +44,8 @@ public interface GamePlayerRepository extends JpaRepository<GamePlayer, Long> {
     
     @Query("SELECT COUNT(gp) FROM GamePlayer gp WHERE gp.user.id = :userId AND gp.isImpostor = false AND gp.isWinner = true")
     int countGamesWonAsCivilianByUserId(@Param("userId") Long userId);
+    
+    // Reconexión: buscar partida activa más reciente del usuario
+    @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.game g JOIN FETCH gp.user WHERE gp.user.id = :userId AND g.status IN ('WAITING', 'IN_PROGRESS', 'VOTING') ORDER BY g.createdAt DESC")
+    List<GamePlayer> findActiveGamesByUserId(@Param("userId") Long userId);
 }

@@ -35,6 +35,7 @@ public class GameServiceImpl implements GameService {
     private final GameRepository gameRepository;
     private final GamePlayerRepository gamePlayerRepository;
     private final UserRepository userRepository;
+    private final GameSessionManager gameSessionManager;
     private final Random random = new Random();
 
     @Override
@@ -138,20 +139,29 @@ public class GameServiceImpl implements GameService {
         Game game = gameRepository.findByRoomCode(roomCode)
                 .orElseThrow(() -> GameException.gameNoEncontradoPorCodigo(roomCode));
         
-        // Verificar que la partida esté en estado WAITING
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> UserException.usuarioNoEncontradoIDLong(userId));
+        
+        // Verificar si el usuario ya está en la partida (reconexión)
+        Optional<GamePlayer> existingPlayer = gamePlayerRepository.findByGameIdAndUserId(game.getId(), userId);
+        
+        if (existingPlayer.isPresent()) {
+            // El usuario ya estaba en la partida - permitir reconexión si la partida no ha terminado
+            if ("FINISHED".equals(game.getStatus())) {
+                throw new GameException("La partida ya ha terminado", "GAME_FINISHED");
+            }
+            
+            AnsiColors.successLog(logger, "Usuario " + userId + " reconectado a partida " + roomCode + " (ya estaba en ella)");
+            List<GamePlayerDto> players = getGamePlayers(game.getId());
+            return GameDto.fromEntityWithPlayers(game, players);
+        }
+        
+        // Usuario nuevo - verificar que la partida esté en estado WAITING
         if (!"WAITING".equals(game.getStatus())) {
             throw GameException.gameYaIniciado(roomCode);
         }
         
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> UserException.usuarioNoEncontradoIDLong(userId));
-        
-        // Verificar si el usuario ya está en la partida
-        if (gamePlayerRepository.existsByGameIdAndUserId(game.getId(), userId)) {
-            throw GameException.jugadorYaEnPartida(userId);
-        }
-        
-        // Añadir jugador
+        // Añadir jugador nuevo
         GamePlayer player = new GamePlayer();
         player.setGame(game);
         player.setUser(user);
@@ -284,9 +294,77 @@ public class GameServiceImpl implements GameService {
         GamePlayer player = gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
                 .orElseThrow(() -> GameException.jugadorNoEnPartida(userId));
         
-        // Si es impostor, no tiene palabra
-        String word = player.getIsImpostor() ? null : "PALABRA_DEL_JUEGO"; // La palabra real se enviará desde el controlador
+        // Obtener la palabra secreta del GameSessionManager
+        String word = null;
+        if (!Boolean.TRUE.equals(player.getIsImpostor())) {
+            Game game = player.getGame();
+            if (game != null && game.getRoomCode() != null) {
+                word = gameSessionManager.getGameSession(game.getRoomCode())
+                        .map(GameSessionManager.GameSessionInfo::getSecretWord)
+                        .orElse(null);
+            }
+        }
+        
+        AnsiColors.infoLog(logger, "Obteniendo rol para usuario " + userId + ": " + 
+                (Boolean.TRUE.equals(player.getIsImpostor()) ? "IMPOSTOR" : "CIUDADANO") +
+                (word != null ? " (palabra: " + word + ")" : ""));
         
         return GamePlayerDto.fromEntityWithRole(player, word);
+    }
+
+    /**
+     * Obtener partida activa del usuario (para reconexión tipo Clash Royale)
+     * Si el usuario tiene una partida activa (WAITING, IN_PROGRESS, VOTING), retorna la más reciente
+     */
+    @Override
+    public Optional<GameDto> getActiveGameForUser(Long userId) {
+        AnsiColors.infoLog(logger, "Buscando partida activa para usuario: " + userId);
+        
+        List<GamePlayer> activeGames = gamePlayerRepository.findActiveGamesByUserId(userId);
+        
+        if (activeGames.isEmpty()) {
+            AnsiColors.infoLog(logger, "No hay partidas activas para usuario: " + userId);
+            return Optional.empty();
+        }
+        
+        // Tomar la más reciente (ya viene ordenada por createdAt DESC)
+        GamePlayer gamePlayer = activeGames.get(0);
+        Game game = gamePlayer.getGame();
+        List<GamePlayerDto> players = getGamePlayers(game.getId());
+        
+        AnsiColors.successLog(logger, "Partida activa encontrada: " + game.getRoomCode() + 
+                " (status: " + game.getStatus() + "). Total partidas activas: " + activeGames.size());
+        
+        return Optional.of(GameDto.fromEntityWithPlayers(game, players));
+    }
+
+    /**
+     * Reconectarse a una partida ya iniciada
+     * Permite que un usuario que YA ESTABA en la partida vuelva a conectarse
+     */
+    @Override
+    @Transactional
+    public GameDto rejoinGame(String roomCode, Long userId) {
+        AnsiColors.infoLog(logger, "Usuario " + userId + " reconectándose a sala: " + roomCode);
+        
+        Game game = gameRepository.findByRoomCode(roomCode)
+                .orElseThrow(() -> GameException.gameNoEncontradoPorCodigo(roomCode));
+        
+        // Verificar que la partida esté activa (no terminada)
+        if ("FINISHED".equals(game.getStatus())) {
+            throw new GameException("La partida ya ha terminado", "GAME_FINISHED");
+        }
+        
+        // Verificar que el usuario SÍ estaba en la partida
+        GamePlayer player = gamePlayerRepository.findByGameIdAndUserId(game.getId(), userId)
+                .orElseThrow(() -> new GameException(
+                        "No puedes reconectarte a una partida en la que no estabas",
+                        "PLAYER_NOT_IN_GAME"
+                ));
+        
+        AnsiColors.successLog(logger, "Usuario " + userId + " reconectado a partida " + roomCode + " (es impostor: " + player.getIsImpostor() + ")");
+        
+        List<GamePlayerDto> players = getGamePlayers(game.getId());
+        return GameDto.fromEntityWithPlayers(game, players);
     }
 }

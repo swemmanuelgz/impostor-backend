@@ -34,4 +34,13 @@ public interface GameRepository extends JpaRepository<Game, Long> {
     
     @Query("SELECT g FROM Game g LEFT JOIN FETCH g.creator WHERE g.status IN ('WAITING', 'IN_PROGRESS') AND g.creator.id = :userId")
     List<Game> findActiveGamesByCreator(@Param("userId") Long userId);
+    
+    // Buscar partidas activas antiguas para limpieza
+    @Query("SELECT g FROM Game g WHERE g.status IN ('WAITING', 'IN_PROGRESS', 'VOTING') AND g.createdAt < :cutoffTime")
+    List<Game> findStaleActiveGames(@Param("cutoffTime") java.time.Instant cutoffTime);
+    
+    // Cerrar todas las partidas antiguas de una vez
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE Game g SET g.status = 'FINISHED' WHERE g.status IN ('WAITING', 'IN_PROGRESS', 'VOTING') AND g.createdAt < :cutoffTime")
+    int closeStaleGames(@Param("cutoffTime") java.time.Instant cutoffTime);
 }

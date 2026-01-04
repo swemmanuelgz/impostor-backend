@@ -37,4 +37,8 @@ public interface GameService {
     // Obtener jugadores
     List<GamePlayerDto> getGamePlayers(Long gameId);
     GamePlayerDto getPlayerRole(Long gameId, Long userId);
+    
+    // Reconexión
+    Optional<GameDto> getActiveGameForUser(Long userId);
+    GameDto rejoinGame(String roomCode, Long userId);
 }

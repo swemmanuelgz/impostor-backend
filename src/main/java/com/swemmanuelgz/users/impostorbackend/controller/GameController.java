@@ -51,6 +51,7 @@ public class GameController {
     /**
      * Unirse a una partida
      * POST /api/game/join
+     * Ahora también permite reconexión si el usuario ya estaba en la partida
      */
     @PostMapping("/join")
     public ResponseEntity<GameDto> joinGame(@RequestBody JoinGameRequest request) {
@@ -60,6 +61,26 @@ public class GameController {
         
         AnsiColors.successLog(logger, "Usuario unido exitosamente a la partida");
         return ResponseEntity.ok(gameDto);
+    }
+
+    /**
+     * Verificar si el usuario tiene una partida activa (para auto-reconexión tipo Clash Royale)
+     * GET /api/game/active/{userId}
+     * Retorna la partida activa si existe, o 204 No Content si no hay ninguna
+     */
+    @GetMapping("/active/{userId}")
+    public ResponseEntity<GameDto> getActiveGame(@PathVariable Long userId) {
+        AnsiColors.infoLog(logger, "Verificando partida activa para usuario: " + userId);
+        
+        return gameService.getActiveGameForUser(userId)
+                .map(gameDto -> {
+                    AnsiColors.successLog(logger, "Partida activa encontrada: " + gameDto.getRoomCode());
+                    return ResponseEntity.ok(gameDto);
+                })
+                .orElseGet(() -> {
+                    AnsiColors.infoLog(logger, "No hay partida activa para usuario: " + userId);
+                    return ResponseEntity.noContent().build();
+                });
     }
 
     /**
@@ -202,21 +223,17 @@ public class GameController {
     /**
      * Obtener rol del jugador en una partida (su palabra o si es impostor)
      * GET /api/game/{gameId}/role/{userId}
+     * Útil para reconexión: permite al jugador recuperar su rol y palabra
      */
     @GetMapping("/{gameId}/role/{userId}")
     public ResponseEntity<GamePlayerDto> getPlayerRole(
             @PathVariable Long gameId,
-            @PathVariable Long userId,
-            @RequestParam(required = false) String word) {
+            @PathVariable Long userId) {
         
         GamePlayerDto playerRole = gameService.getPlayerRole(gameId, userId);
         
-        // Si no es impostor, asignar la palabra
-        if (playerRole.getIsImpostor() != null && !playerRole.getIsImpostor() && word != null) {
-            playerRole.setWord(word);
-        }
-        
-        AnsiColors.infoLog(logger, "Obteniendo rol del jugador " + userId + " en partida " + gameId);
+        AnsiColors.infoLog(logger, "Obteniendo rol del jugador " + userId + " en partida " + gameId + 
+                " - Es impostor: " + playerRole.getIsImpostor());
         return ResponseEntity.ok(playerRole);
     }
 

@@ -89,6 +89,7 @@ public class GameWebSocketMessage {
                 .roomCode(game.getRoomCode())
                 .senderId(player.getUserId())
                 .senderUsername(player.getUsername())
+                .content("El usuario " + player.getUsername() + " se ha conectado a la partida")
                 .gameData(game)
                 .playerData(player)
                 .currentPlayers(game.getCurrentPlayers())

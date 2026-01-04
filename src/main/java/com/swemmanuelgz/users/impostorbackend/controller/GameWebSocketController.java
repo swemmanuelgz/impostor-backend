@@ -4,6 +4,8 @@ import com.swemmanuelgz.users.impostorbackend.dto.*;
 import com.swemmanuelgz.users.impostorbackend.entity.Game;
 import com.swemmanuelgz.users.impostorbackend.exception.GameException;
 import com.swemmanuelgz.users.impostorbackend.exception.WebSocketException;
+import com.swemmanuelgz.users.impostorbackend.repository.UserRepository;
+import com.swemmanuelgz.users.impostorbackend.service.GameCleanupScheduler;
 import com.swemmanuelgz.users.impostorbackend.service.GameServiceImpl;
 import com.swemmanuelgz.users.impostorbackend.service.GameSessionManager;
 import com.swemmanuelgz.users.impostorbackend.utils.AnsiColors;
@@ -52,6 +54,8 @@ public class GameWebSocketController {
     private final GameSessionManager sessionManager;
     private final SimpMessagingTemplate messagingTemplate;
     private final WordGenerator wordGenerator;
+    private final GameCleanupScheduler gameCleanupScheduler;
+    private final UserRepository userRepository;
 
     // ========== Eventos de Conexión/Desconexión ==========
     
@@ -79,34 +83,38 @@ public class GameWebSocketController {
     public void handleSessionDisconnect(SessionDisconnectEvent event) {
         SimpMessageHeaderAccessor headers = SimpMessageHeaderAccessor.wrap(event.getMessage());
         String sessionId = headers.getSessionId();
-        Principal user = headers.getUser();
         
         AnsiColors.warningLog(logger, "=== DESCONEXIÓN WEBSOCKET ===");
         AnsiColors.infoLog(logger, "SessionId: " + sessionId);
         
-        // Registrar desconexión en el gestor de sesiones
-        sessionManager.playerDisconnected(sessionId);
+        // Registrar desconexión en el gestor de sesiones y obtener resultado
+        GameSessionManager.DisconnectionResult result = sessionManager.playerDisconnected(sessionId);
         
-        // Si el usuario estaba en una sala, notificar a los demás
-        if (user != null) {
-            try {
-                Long userId = Long.parseLong(user.getName());
-                String roomCode = sessionManager.findRoomByUserId(userId);
-                
-                if (roomCode != null) {
-                    // Notificar desconexión a la sala
-                    GameWebSocketMessage disconnectMsg = GameWebSocketMessage.builder()
-                            .type("PLAYER_DISCONNECTED")
-                            .roomCode(roomCode)
-                            .senderId(userId)
-                            .content("Jugador desconectado temporalmente")
-                            .build();
-                    
-                    messagingTemplate.convertAndSend("/topic/game/" + roomCode, disconnectMsg);
-                    AnsiColors.infoLog(logger, "Notificada desconexión del jugador " + userId + " a sala " + roomCode);
+        if (result != null) {
+            // Obtener username del jugador desconectado
+            String username = userRepository.findById(result.userId)
+                    .map(u -> u.getUsername())
+                    .orElse("Jugador " + result.userId);
+            
+            // Notificar desconexión a la sala con el nombre de usuario
+            GameWebSocketMessage disconnectMsg = GameWebSocketMessage.builder()
+                    .type("PLAYER_DISCONNECTED")
+                    .roomCode(result.roomCode)
+                    .senderId(result.userId)
+                    .senderUsername(username)
+                    .content("El usuario " + username + " se ha desconectado de la partida")
+                    .build();
+            
+            messagingTemplate.convertAndSend("/topic/game/" + result.roomCode, disconnectMsg);
+            AnsiColors.infoLog(logger, "Notificada desconexión del jugador " + username + " (" + result.userId + ") a sala " + result.roomCode);
+            
+            // Si la sala quedó vacía, cerrarla automáticamente
+            if (result.roomIsEmpty) {
+                AnsiColors.warningLog(logger, "Sala " + result.roomCode + " quedó vacía, cerrando automáticamente...");
+                boolean closed = gameCleanupScheduler.closeGameIfEmpty(result.roomCode);
+                if (closed) {
+                    AnsiColors.successLog(logger, "Sala " + result.roomCode + " cerrada automáticamente por estar vacía");
                 }
-            } catch (NumberFormatException e) {
-                AnsiColors.errorLog(logger, "UserId no válido: " + user.getName());
             }
         }
     }

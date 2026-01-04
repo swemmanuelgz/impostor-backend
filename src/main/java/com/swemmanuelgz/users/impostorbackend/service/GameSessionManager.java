@@ -94,17 +94,18 @@ public class GameSessionManager {
     
     /**
      * Registra la desconexión de un jugador
+     * @return DisconnectionResult con la info de la desconexión (roomCode, userId, isEmpty)
      */
-    public void playerDisconnected(String sessionId) {
+    public DisconnectionResult playerDisconnected(String sessionId) {
         Long userId = sessionToUser.remove(sessionId);
         if (userId == null) {
             AnsiColors.warningLog(logger, "Sesión desconocida desconectada: " + sessionId);
-            return;
+            return null;
         }
         
         AnsiColors.infoLog(logger, "Jugador " + userId + " desconectado (sessionId: " + sessionId + ")");
         
-        // Buscar en qué sala estaba
+        // Buscar en qué sala estaba ANTES de removerlo
         String roomCode = findRoomByUserId(userId);
         if (roomCode != null) {
             // Registrar desconexión para posible reconexión
@@ -114,9 +115,28 @@ public class GameSessionManager {
             Set<Long> players = connectedPlayers.get(roomCode);
             if (players != null) {
                 players.remove(userId);
+                int remaining = players.size();
                 AnsiColors.infoLog(logger, "Jugador " + userId + " removido de sala " + roomCode + 
-                    ". Quedan " + players.size() + " conectados");
+                    ". Quedan " + remaining + " conectados");
+                
+                return new DisconnectionResult(userId, roomCode, remaining == 0);
             }
+        }
+        return null;
+    }
+    
+    /**
+     * Resultado de una desconexión
+     */
+    public static class DisconnectionResult {
+        public final Long userId;
+        public final String roomCode;
+        public final boolean roomIsEmpty;
+        
+        public DisconnectionResult(Long userId, String roomCode, boolean roomIsEmpty) {
+            this.userId = userId;
+            this.roomCode = roomCode;
+            this.roomIsEmpty = roomIsEmpty;
         }
     }
     
@@ -225,6 +245,14 @@ public class GameSessionManager {
     public boolean hasRoomForPlayer(String roomCode) {
         int count = getConnectedPlayersCount(roomCode);
         return count < MAX_PLAYERS_PER_ROOM;
+    }
+    
+    /**
+     * Verifica si hay al menos un jugador conectado en la sala
+     */
+    public boolean hasConnectedPlayers(String roomCode) {
+        Set<Long> players = connectedPlayers.get(roomCode);
+        return players != null && !players.isEmpty();
     }
     
     /**
