@@ -39,7 +39,7 @@ public class GameSessionManager {
     /**
      * Mínimo de jugadores para iniciar partida
      */
-    public static final int MIN_PLAYERS_TO_START = 3;
+    public static final int MIN_PLAYERS_TO_START = 2;
     
     /**
      * Tiempo máximo de desconexión permitido para reconexión (en segundos)

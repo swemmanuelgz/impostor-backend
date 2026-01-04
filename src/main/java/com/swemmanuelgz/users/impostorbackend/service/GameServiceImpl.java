@@ -193,7 +193,7 @@ public class GameServiceImpl implements GameService {
     public GameDto startGame(Long gameId, Long creatorId, String word) {
         AnsiColors.infoLog(logger, "Iniciando partida " + gameId);
         
-        Game game = gameRepository.findById(gameId)
+        Game game = gameRepository.findByIdWithCreator(gameId)
                 .orElseThrow(() -> GameException.gameNoEncontrado(gameId));
         
         // Verificar que quien inicia es el creador
@@ -208,7 +208,7 @@ public class GameServiceImpl implements GameService {
         
         List<GamePlayer> players = gamePlayerRepository.findByGameId(gameId);
         
-        if (players.size() < 3) {
+        if (players.size() < 2) {
             throw new GameException("Se necesitan al menos 3 jugadores para iniciar", "JUGADORES_INSUFICIENTES");
         }
         

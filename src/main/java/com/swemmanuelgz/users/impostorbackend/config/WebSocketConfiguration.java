@@ -1,11 +1,15 @@
 package com.swemmanuelgz.users.impostorbackend.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.swemmanuelgz.users.impostorbackend.utils.AnsiColors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.converter.DefaultContentTypeResolver;
+import org.springframework.messaging.converter.MappingJackson2MessageConverter;
+import org.springframework.messaging.converter.MessageConverter;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -15,10 +19,12 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.util.MimeTypeUtils;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+import java.util.List;
 import java.util.logging.Logger;
 
 @Configuration
@@ -27,6 +33,7 @@ import java.util.logging.Logger;
 public class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
 
     private final Logger logger = Logger.getLogger(WebSocketConfiguration.class.getName());
+    private final ObjectMapper objectMapper;
 //
 //    @Autowired
 //    private ApiKeyStompInterceptor apiKeyStompInterceptor;
@@ -99,5 +106,26 @@ public class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer 
     public void configureClientOutboundChannel(ChannelRegistration registration) {
         // Aumentar el tamaño del pool de hilos para mensajes salientes también
         registration.taskExecutor().corePoolSize(5).maxPoolSize(10);
+    }
+
+    /**
+     * Configura el converter de mensajes para usar el ObjectMapper personalizado
+     * que maneja formatos de fecha flexibles (importante para Flutter)
+     */
+    @Override
+    public boolean configureMessageConverters(List<MessageConverter> messageConverters) {
+        AnsiColors.infoLog(logger, "Configurando message converters con ObjectMapper personalizado");
+        
+        DefaultContentTypeResolver resolver = new DefaultContentTypeResolver();
+        resolver.setDefaultMimeType(MimeTypeUtils.APPLICATION_JSON);
+        
+        MappingJackson2MessageConverter converter = new MappingJackson2MessageConverter();
+        converter.setObjectMapper(objectMapper);
+        converter.setContentTypeResolver(resolver);
+        
+        messageConverters.add(converter);
+        
+        // Retornar false para añadir a los converters existentes, true para reemplazar
+        return false;
     }
 }

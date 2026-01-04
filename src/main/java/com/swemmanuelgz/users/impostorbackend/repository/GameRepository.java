@@ -14,7 +14,11 @@ import java.util.Optional;
 @Repository
 public interface GameRepository extends JpaRepository<Game, Long> {
     
-    Optional<Game> findByRoomCode(String roomCode);
+    @Query("SELECT g FROM Game g LEFT JOIN FETCH g.creator WHERE g.roomCode = :roomCode")
+    Optional<Game> findByRoomCode(@Param("roomCode") String roomCode);
+    
+    @Query("SELECT g FROM Game g LEFT JOIN FETCH g.creator WHERE g.id = :id")
+    Optional<Game> findByIdWithCreator(@Param("id") Long id);
     
     boolean existsByRoomCode(String roomCode);
     
@@ -22,12 +26,12 @@ public interface GameRepository extends JpaRepository<Game, Long> {
     
     Page<Game> findByStatus(String status, Pageable pageable);
     
-    @Query("SELECT g FROM Game g WHERE g.creator.id = :creatorId")
+    @Query("SELECT g FROM Game g LEFT JOIN FETCH g.creator WHERE g.creator.id = :creatorId")
     List<Game> findByCreatorId(@Param("creatorId") Long creatorId);
     
-    @Query("SELECT g FROM Game g WHERE g.status = 'WAITING' ORDER BY g.createdAt DESC")
+    @Query("SELECT g FROM Game g LEFT JOIN FETCH g.creator WHERE g.status = 'WAITING' ORDER BY g.createdAt DESC")
     List<Game> findAvailableGames();
     
-    @Query("SELECT g FROM Game g WHERE g.status IN ('WAITING', 'IN_PROGRESS') AND g.creator.id = :userId")
+    @Query("SELECT g FROM Game g LEFT JOIN FETCH g.creator WHERE g.status IN ('WAITING', 'IN_PROGRESS') AND g.creator.id = :userId")
     List<Game> findActiveGamesByCreator(@Param("userId") Long userId);
 }

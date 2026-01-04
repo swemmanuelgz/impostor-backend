@@ -12,13 +12,13 @@ import java.util.Optional;
 @Repository
 public interface GamePlayerRepository extends JpaRepository<GamePlayer, Long> {
     
-    @Query("SELECT gp FROM GamePlayer gp WHERE gp.game.id = :gameId")
+    @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.user JOIN FETCH gp.game WHERE gp.game.id = :gameId")
     List<GamePlayer> findByGameId(@Param("gameId") Long gameId);
     
-    @Query("SELECT gp FROM GamePlayer gp WHERE gp.user.id = :userId")
+    @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.user WHERE gp.user.id = :userId")
     List<GamePlayer> findByUserId(@Param("userId") Long userId);
     
-    @Query("SELECT gp FROM GamePlayer gp WHERE gp.game.id = :gameId AND gp.user.id = :userId")
+    @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.user JOIN FETCH gp.game WHERE gp.game.id = :gameId AND gp.user.id = :userId")
     Optional<GamePlayer> findByGameIdAndUserId(@Param("gameId") Long gameId, @Param("userId") Long userId);
     
     @Query("SELECT COUNT(gp) FROM GamePlayer gp WHERE gp.game.id = :gameId")

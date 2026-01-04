@@ -7,6 +7,7 @@ import com.swemmanuelgz.users.impostorbackend.exception.WebSocketException;
 import com.swemmanuelgz.users.impostorbackend.service.GameServiceImpl;
 import com.swemmanuelgz.users.impostorbackend.service.GameSessionManager;
 import com.swemmanuelgz.users.impostorbackend.utils.AnsiColors;
+import com.swemmanuelgz.users.impostorbackend.utils.WordGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -50,6 +51,7 @@ public class GameWebSocketController {
     private final GameServiceImpl gameService;
     private final GameSessionManager sessionManager;
     private final SimpMessagingTemplate messagingTemplate;
+    private final WordGenerator wordGenerator;
 
     // ========== Eventos de Conexión/Desconexión ==========
     
@@ -127,26 +129,44 @@ public class GameWebSocketController {
         AnsiColors.infoLog(logger, "RoomCode: " + roomCode + ", UserId: " + message.getSenderId());
         
         try {
+            GameDto gameDto;
+            GamePlayerDto playerData;
+            
             // Validar que se puede unir
             sessionManager.validateCanJoin(roomCode, message.getSenderId());
             
-            // Unirse a la partida via servicio (persiste en BD)
-            GameDto gameDto = gameService.joinGame(roomCode, message.getSenderId());
+            try {
+                // Intentar unirse a la partida via servicio (persiste en BD)
+                gameDto = gameService.joinGame(roomCode, message.getSenderId());
+                AnsiColors.successLog(logger, "Jugador " + message.getSenderUsername() + " se unió a sala " + roomCode);
+                
+            } catch (GameException e) {
+                // Si el error es que ya está en la partida, simplemente obtener el estado actual (idempotente)
+                if (GameException.JUGADOR_YA_EN_PARTIDA.equals(e.getCodigo())) {
+                    AnsiColors.warningLog(logger, "Jugador " + message.getSenderId() + " ya está en la partida - devolviendo estado actual");
+                    
+                    // Obtener la partida actual con sus jugadores
+                    Game game = gameService.findByRoomCode(roomCode)
+                            .orElseThrow(() -> GameException.gameNoEncontradoPorCodigo(roomCode));
+                    List<GamePlayerDto> players = gameService.getGamePlayers(game.getId());
+                    gameDto = GameDto.fromEntityWithPlayers(game, players);
+                } else {
+                    throw e; // Re-lanzar otros errores de GameException
+                }
+            }
             
             // Registrar conexión en el gestor de sesiones
             String sessionId = headerAccessor.getSessionId();
             sessionManager.playerConnected(roomCode, message.getSenderId(), sessionId);
             
-            // Obtener datos del jugador que se unió
+            // Obtener datos del jugador
             List<GamePlayerDto> players = gameDto.getPlayers();
-            GamePlayerDto newPlayer = players.stream()
+            playerData = players.stream()
                     .filter(p -> p.getUserId().equals(message.getSenderId()))
                     .findFirst()
                     .orElse(null);
             
-            AnsiColors.successLog(logger, "Jugador " + message.getSenderUsername() + " se unió a sala " + roomCode);
-            
-            return GameWebSocketMessage.playerJoined(gameDto, newPlayer);
+            return GameWebSocketMessage.playerJoined(gameDto, playerData);
             
         } catch (GameException e) {
             AnsiColors.errorLog(logger, "Error GameException al unirse: " + e.getMessage());
@@ -240,10 +260,12 @@ public class GameWebSocketController {
             Game game = gameService.findByRoomCode(roomCode)
                     .orElseThrow(() -> WebSocketException.salaNoEncontrada(roomCode));
             
-            // Iniciar partida (esto selecciona al impostor aleatoriamente)
+            // Generar palabra automáticamente si no se proporciona
             String word = message.getContent();
             if (word == null || word.trim().isEmpty()) {
-                throw WebSocketException.mensajeInvalido("La palabra secreta es requerida");
+                WordGenerator.WordWithCategory generated = wordGenerator.getRandomWordWithCategory();
+                word = generated.word();
+                AnsiColors.infoLog(logger, "📝 Palabra generada automáticamente: " + word + " (categoría: " + generated.category() + ")");
             }
             
             GameDto gameDto = gameService.startGame(game.getId(), message.getSenderId(), word);
@@ -279,23 +301,34 @@ public class GameWebSocketController {
     private void sendRoleNotifications(Long gameId, String roomCode, String word) {
         List<GamePlayerDto> players = gameService.getGamePlayers(gameId);
         
+        AnsiColors.infoLog(logger, "Enviando roles a " + players.size() + " jugadores");
+        
         for (GamePlayerDto player : players) {
+            String playerWord = player.getIsImpostor() ? null : word;
+            
             GameNotificationDto notification = GameNotificationDto.roleReveal(
                     gameId,
                     roomCode,
                     player.getUserId(),
                     player.getIsImpostor(),
-                    word
+                    playerWord);
+            
+            // ✅ ENVIAMOS la notificación al usuario
+            String userIdStr = player.getUserId().toString();
+            messagingTemplate.convertAndSendToUser(
+                    userIdStr,
+                    "/queue/game-notifications",
+                    notification
             );
             
-            // Enviar notificación personal
-            String destination = "/queue/game-notifications";
-            String userIdStr = player.getUserId().toString();
-            
-            messagingTemplate.convertAndSendToUser(userIdStr, destination, notification);
-            
-            AnsiColors.successLog(logger, "Rol enviado a jugador " + player.getUserId() + 
-                " - Impostor: " + player.getIsImpostor());
+            String roleStr = player.getIsImpostor() ? "IMPOSTOR" : "CIUDADANO";
+            String wordStr = player.getIsImpostor() ? "(sin palabra)" : "(palabra: " + word + ")";
+            AnsiColors.successLog(logger, 
+                String.format("✅ Rol enviado a User %d (%s) - %s %s", 
+                    player.getUserId(), 
+                    player.getUsername(),
+                    roleStr,
+                    wordStr));
         }
     }
     
