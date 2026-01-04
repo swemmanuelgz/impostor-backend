@@ -27,6 +27,8 @@ public class GameDto {
     private String word; // Solo se envía al civil, null para impostor
     private Integer maxPlayers;
     private Integer currentPlayers;
+    private Integer duration; // Duración de la partida en minutos
+    private Instant startedAt; // Cuándo inició la partida
 
     public static GameDto fromEntity(Game game) {
         if (game == null) return null;
@@ -37,6 +39,8 @@ public class GameDto {
                 .creatorId(game.getCreator() != null ? game.getCreator().getId() : null)
                 .creatorUsername(game.getCreator() != null ? game.getCreator().getUsername() : null)
                 .createdAt(game.getCreatedAt())
+                .duration(game.getDuration())
+                .startedAt(game.getStartedAt())
                 .build();
     }
 

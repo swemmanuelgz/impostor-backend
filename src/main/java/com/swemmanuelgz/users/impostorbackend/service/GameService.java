@@ -24,7 +24,7 @@ public interface GameService {
     List<Game> findActiveGamesByCreator(Long userId);
     
     // Lógica del juego
-    GameDto createGame(Long creatorId, String category, Integer maxPlayers);
+    GameDto createGame(Long creatorId, String category, Integer maxPlayers, Integer duration);
     GameDto joinGame(String roomCode, Long userId);
     void leaveGame(Long gameId, Long userId);
     GameDto startGame(Long gameId, Long creatorId, String word);

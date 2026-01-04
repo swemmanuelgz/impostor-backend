@@ -41,7 +41,8 @@ public class GameController {
         GameDto gameDto = gameService.createGame(
                 request.getCreatorId(),
                 request.getCategory(),
-                request.getMaxPlayers()
+                request.getMaxPlayers(),
+                request.getDuration()
         );
         
         AnsiColors.successLog(logger, "Partida creada con código: " + gameDto.getRoomCode());

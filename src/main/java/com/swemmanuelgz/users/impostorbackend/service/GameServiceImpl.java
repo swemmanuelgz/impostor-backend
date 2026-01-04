@@ -96,8 +96,8 @@ public class GameServiceImpl implements GameService {
 
     @Override
     @Transactional
-    public GameDto createGame(Long creatorId, String category, Integer maxPlayers) {
-        AnsiColors.infoLog(logger, "Creando partida para usuario ID: " + creatorId);
+    public GameDto createGame(Long creatorId, String category, Integer maxPlayers, Integer duration) {
+        AnsiColors.infoLog(logger, "Creando partida para usuario ID: " + creatorId + " con duración: " + duration + " minutos");
         
         User creator = userRepository.findById(creatorId)
                 .orElseThrow(() -> UserException.usuarioNoEncontradoIDLong(creatorId));
@@ -113,6 +113,7 @@ public class GameServiceImpl implements GameService {
         game.setStatus("WAITING");
         game.setCreator(creator);
         game.setCreatedAt(Instant.now());
+        game.setDuration(duration != null ? duration : 10); // Default 10 minutos
         
         game = gameRepository.save(game);
         AnsiColors.successLog(logger, "Partida creada con código: " + roomCode);
@@ -232,6 +233,7 @@ public class GameServiceImpl implements GameService {
         
         // Cambiar estado de la partida
         game.setStatus("IN_PROGRESS");
+        game.setStartedAt(Instant.now()); // Guardar momento de inicio para el cronómetro
         game = gameRepository.save(game);
         
         AnsiColors.successLog(logger, "Partida " + gameId + " iniciada. Impostor seleccionado.");

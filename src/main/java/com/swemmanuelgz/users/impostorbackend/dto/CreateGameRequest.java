@@ -15,5 +15,6 @@ import lombok.NoArgsConstructor;
 public class CreateGameRequest {
     private Long creatorId;
     private String category; // Categoría de palabras
-    private Integer maxPlayers; // Máximo de jugadores (opcional, default 10)
+    private Integer maxPlayers; // Máximo de jugadores (opcional, default 8)
+    private Integer duration; // Duración de la partida en minutos (10, 20, 30, 40)
 }

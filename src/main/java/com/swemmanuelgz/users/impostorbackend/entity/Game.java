@@ -44,4 +44,11 @@ public class Game {
     @Column(name = "created_at")
     private Instant createdAt;
 
+    @Column(name = "duration")
+    @ColumnDefault("10")
+    private Integer duration = 10;
+
+    @Column(name = "started_at")
+    private Instant startedAt;
+
 }
