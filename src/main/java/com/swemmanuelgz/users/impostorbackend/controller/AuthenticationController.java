@@ -6,14 +6,17 @@ import com.swemmanuelgz.users.impostorbackend.dto.GoogleUserInfo;
 import com.swemmanuelgz.users.impostorbackend.dto.TokenRefreshRequest;
 import com.swemmanuelgz.users.impostorbackend.dto.TokenRefreshResponse;
 import com.swemmanuelgz.users.impostorbackend.dto.UserDto;
+import com.swemmanuelgz.users.impostorbackend.entity.LoginAttempt;
 import com.swemmanuelgz.users.impostorbackend.entity.User;
 import com.swemmanuelgz.users.impostorbackend.exception.UserException;
 import com.swemmanuelgz.users.impostorbackend.security.JwtProvider;
 import com.swemmanuelgz.users.impostorbackend.service.GoogleTokenService;
+import com.swemmanuelgz.users.impostorbackend.service.LoginAttemptService;
 import com.swemmanuelgz.users.impostorbackend.service.OAuth2UserService;
 import com.swemmanuelgz.users.impostorbackend.service.UserServiceImpl;
 import com.swemmanuelgz.users.impostorbackend.utils.AnsiColors;
 import io.jsonwebtoken.Claims;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,6 +39,7 @@ public class AuthenticationController {
     private final UserServiceImpl userService;
     private final GoogleTokenService googleTokenService;
     private final OAuth2UserService oAuth2UserService;
+    private final LoginAttemptService loginAttemptService;
 
     /**
      * Login de usuario
@@ -43,18 +47,30 @@ public class AuthenticationController {
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestParam("username") String username,
-                                   @RequestParam("password") String password) {
+                                   @RequestParam("password") String password,
+                                   HttpServletRequest request) {
         
-        AnsiColors.infoLog(logger, "Intento de login para: " + username);
+        String clientIp = getClientIP(request);
+        String userAgent = request.getHeader("User-Agent");
         
-        User user = userService.findByEmailOrUsername(username)
-                .orElseThrow(() -> UserException.usuarioNoEncontradoEmail(username));
+        AnsiColors.infoLog(logger, "Intento de login para: " + username + " desde IP: " + clientIp);
+        
+        // Buscar usuario
+        User user = userService.findByEmailOrUsername(username).orElse(null);
+        
+        if (user == null) {
+            loginAttemptService.recordFailedLogin(username, clientIp, userAgent, 
+                    LoginAttempt.AUTH_TYPE_LOCAL, LoginAttempt.FAILURE_USER_NOT_FOUND);
+            throw UserException.usuarioNoEncontradoEmail(username);
+        }
         
         AnsiColors.infoLog(logger, "Usuario encontrado: " + user.getEmail());
         
         // Verificar si es usuario OAuth2 (sin contraseña local)
         if (user.isOAuth2User()) {
             String provider = user.getAuthProvider() != null ? user.getAuthProvider() : "OAuth";
+            loginAttemptService.recordFailedLogin(username, clientIp, userAgent,
+                    LoginAttempt.AUTH_TYPE_LOCAL, LoginAttempt.FAILURE_OAUTH_USER);
             AnsiColors.warningLog(logger, "Usuario OAuth2 intentando login con contraseña: " + username + " (provider: " + provider + ")");
             throw UserException.usuarioOAuth(provider);
         }
@@ -62,9 +78,18 @@ public class AuthenticationController {
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
         
         if (!encoder.matches(password, user.getPassword())) {
+            loginAttemptService.recordFailedLogin(username, clientIp, userAgent,
+                    LoginAttempt.AUTH_TYPE_LOCAL, LoginAttempt.FAILURE_INVALID_PASSWORD);
             AnsiColors.errorLog(logger, "Contraseña incorrecta para usuario: " + username);
             throw UserException.usuarioPasswordIncorrecto(username);
         }
+        
+        // Login exitoso - registrar y actualizar IP
+        loginAttemptService.recordSuccessfulLogin(username, clientIp, userAgent, 
+                LoginAttempt.AUTH_TYPE_LOCAL, user.getId());
+        user.setLastLoginIp(clientIp);
+        user.setLastLoginAt(Instant.now());
+        userService.update(user);
         
         // Generar tokens
         String accessToken = jwtProvider.generateToken(user);
@@ -119,7 +144,7 @@ public class AuthenticationController {
      * POST /api/auth/signup
      */
     @PostMapping("/signup")
-    public ResponseEntity<?> signup(@RequestBody UserDto userDto) {
+    public ResponseEntity<?> signup(@RequestBody UserDto userDto, HttpServletRequest request) {
         AnsiColors.infoLog(logger, "Registro de nuevo usuario: " + userDto.getEmail());
         
         // Verificar que no exista el usuario
@@ -143,7 +168,7 @@ public class AuthenticationController {
         AnsiColors.successLog(logger, "Usuario registrado con ID: " + savedUser.getId());
         
         // Login automático después del registro
-        return login(savedUser.getEmail(), rawPassword);
+        return login(savedUser.getEmail(), rawPassword, request);
     }
 
     /**
@@ -179,8 +204,12 @@ public class AuthenticationController {
      * El backend valida el token, crea/actualiza el usuario, y devuelve JWT propio.
      */
     @PostMapping("/google")
-    public ResponseEntity<?> googleLogin(@RequestBody GoogleAuthRequest request) {
-        AnsiColors.infoLog(logger, "Procesando login con Google");
+    public ResponseEntity<?> googleLogin(@RequestBody GoogleAuthRequest request,
+                                         HttpServletRequest httpRequest) {
+        String clientIp = getClientIP(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
+        
+        AnsiColors.infoLog(logger, "Procesando login con Google desde IP: " + clientIp);
 
         // Verificar si Google OAuth2 está habilitado
         if (!googleTokenService.isEnabled()) {
@@ -199,6 +228,9 @@ public class AuthenticationController {
                 .orElse(null);
 
         if (googleUserInfo == null) {
+            // Registrar intento fallido
+            loginAttemptService.recordFailedLogin("google_token_invalid", clientIp, userAgent,
+                    LoginAttempt.AUTH_TYPE_GOOGLE, "INVALID_GOOGLE_TOKEN");
             AnsiColors.errorLog(logger, "Token de Google inválido");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Token de Google inválido o expirado"));
@@ -206,8 +238,17 @@ public class AuthenticationController {
 
         // 2. Registrar o recuperar usuario
         User user = oAuth2UserService.processGoogleUser(googleUserInfo);
+        
+        // Actualizar última IP y timestamp de login
+        user.setLastLoginIp(clientIp);
+        user.setLastLoginAt(Instant.now());
+        userService.update(user);
 
-        // 3. Generar tokens JWT propios
+        // 3. Registrar login exitoso
+        loginAttemptService.recordSuccessfulLogin(user.getEmail(), clientIp, userAgent,
+                LoginAttempt.AUTH_TYPE_GOOGLE, user.getId());
+
+        // 4. Generar tokens JWT propios
         String accessToken = jwtProvider.generateToken(user);
         String refreshToken = jwtProvider.generateRefreshToken(user);
 
@@ -219,5 +260,26 @@ public class AuthenticationController {
 
         AnsiColors.successLog(logger, "Login con Google exitoso para: " + user.getEmail());
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Obtiene la IP real del cliente, considerando proxies
+     */
+    private String getClientIP(HttpServletRequest request) {
+        String[] headerNames = {
+                "X-Forwarded-For",
+                "X-Real-IP",
+                "Proxy-Client-IP",
+                "WL-Proxy-Client-IP"
+        };
+        
+        for (String header : headerNames) {
+            String ip = request.getHeader(header);
+            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
+                return ip.split(",")[0].trim();
+            }
+        }
+        
+        return request.getRemoteAddr();
     }
 }

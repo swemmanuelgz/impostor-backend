@@ -43,6 +43,12 @@ public class User {
     @Column(name = "provider_id", length = 100)
     private String providerId; // ID del usuario en Google (sub claim)
 
+    @Column(name = "last_login_ip", length = 45)
+    private String lastLoginIp; // Última IP desde la que inició sesión
+
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt; // Timestamp del último login exitoso
+
     @ColumnDefault("CURRENT_TIMESTAMP")
     @Column(name = "created_at")
     private Instant createdAt;

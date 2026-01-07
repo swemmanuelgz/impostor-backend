@@ -49,12 +49,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     /**
      * Bucket para autenticación: 10 requests por minuto (protección brute force)
+     * Usa refillIntervally para que el bloqueo sea real de 60 segundos
+     * en lugar de refillGreedy que rellena gradualmente
      */
     private Bucket createAuthBucket() {
         return Bucket.builder()
                 .addLimit(Bandwidth.builder()
                         .capacity(10)
-                        .refillGreedy(10, Duration.ofMinutes(1))
+                        .refillIntervally(10, Duration.ofMinutes(1))
                         .build())
                 .build();
     }
@@ -91,9 +93,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             response.setContentType("application/json");
             response.setHeader("X-Rate-Limit-Retry-After-Seconds", String.valueOf(waitSeconds));
             response.setHeader("Retry-After", String.valueOf(waitSeconds));
+            
+            // Mensaje específico para endpoints de autenticación
+            String mensaje = isAuthEndpoint(path)
+                    ? "Has realizado demasiados intentos de login. Intenta de nuevo en %d segundos."
+                    : "Has excedido el límite de peticiones. Intenta de nuevo en %d segundos.";
+            
             response.getWriter().write(String.format(
-                    "{\"error\": \"Too Many Requests\", \"message\": \"Has excedido el límite de peticiones. Intenta de nuevo en %d segundos.\", \"retryAfter\": %d}",
-                    waitSeconds, waitSeconds
+                    "{\"codigo\": \"RATE_LIMIT_EXCEEDED\", \"error\": \"Too Many Requests\", \"message\": \"%s\", \"retryAfter\": %d}",
+                    String.format(mensaje, waitSeconds), waitSeconds
             ));
         }
     }
