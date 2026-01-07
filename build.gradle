@@ -44,6 +44,14 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
     //variables entorno
     implementation 'me.paulschwarz:spring-dotenv:2.5.4'
+    // Rate Limiting
+    implementation 'com.bucket4j:bucket4j-core:8.10.1'
+    // Validación de entrada
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // OAuth2 Client (Google Login)
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    // Google API Client para validar tokens de Google
+    implementation 'com.google.api-client:google-api-client:2.2.0'
 }
 
 tasks.named('test') {

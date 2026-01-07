@@ -1,12 +1,16 @@
 package com.swemmanuelgz.users.impostorbackend.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.swemmanuelgz.users.impostorbackend.dto.GoogleAuthRequest;
+import com.swemmanuelgz.users.impostorbackend.dto.GoogleUserInfo;
 import com.swemmanuelgz.users.impostorbackend.dto.TokenRefreshRequest;
 import com.swemmanuelgz.users.impostorbackend.dto.TokenRefreshResponse;
 import com.swemmanuelgz.users.impostorbackend.dto.UserDto;
 import com.swemmanuelgz.users.impostorbackend.entity.User;
 import com.swemmanuelgz.users.impostorbackend.exception.UserException;
 import com.swemmanuelgz.users.impostorbackend.security.JwtProvider;
+import com.swemmanuelgz.users.impostorbackend.service.GoogleTokenService;
+import com.swemmanuelgz.users.impostorbackend.service.OAuth2UserService;
 import com.swemmanuelgz.users.impostorbackend.service.UserServiceImpl;
 import com.swemmanuelgz.users.impostorbackend.utils.AnsiColors;
 import io.jsonwebtoken.Claims;
@@ -30,6 +34,8 @@ public class AuthenticationController {
     
     private final JwtProvider jwtProvider;
     private final UserServiceImpl userService;
+    private final GoogleTokenService googleTokenService;
+    private final OAuth2UserService oAuth2UserService;
 
     /**
      * Login de usuario
@@ -156,5 +162,55 @@ public class AuthenticationController {
         
         AnsiColors.errorLog(logger, "Contraseña antigua incorrecta para usuario ID: " + userId);
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+    }
+
+    /**
+     * Login con Google OAuth2
+     * POST /api/auth/google
+     * 
+     * El frontend (Flutter) hace Sign-In con Google y envía el idToken al backend.
+     * El backend valida el token, crea/actualiza el usuario, y devuelve JWT propio.
+     */
+    @PostMapping("/google")
+    public ResponseEntity<?> googleLogin(@RequestBody GoogleAuthRequest request) {
+        AnsiColors.infoLog(logger, "Procesando login con Google");
+
+        // Verificar si Google OAuth2 está habilitado
+        if (!googleTokenService.isEnabled()) {
+            AnsiColors.errorLog(logger, "Google OAuth2 no está configurado");
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "Google OAuth2 no está configurado en el servidor"));
+        }
+
+        if (request.getIdToken() == null || request.getIdToken().isBlank()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "idToken es requerido"));
+        }
+
+        // 1. Validar token de Google
+        GoogleUserInfo googleUserInfo = googleTokenService.verifyToken(request.getIdToken())
+                .orElse(null);
+
+        if (googleUserInfo == null) {
+            AnsiColors.errorLog(logger, "Token de Google inválido");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Token de Google inválido o expirado"));
+        }
+
+        // 2. Registrar o recuperar usuario
+        User user = oAuth2UserService.processGoogleUser(googleUserInfo);
+
+        // 3. Generar tokens JWT propios
+        String accessToken = jwtProvider.generateToken(user);
+        String refreshToken = jwtProvider.generateRefreshToken(user);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("accessToken", accessToken);
+        response.put("refreshToken", refreshToken);
+        response.put("user", UserDto.fromEntity(user));
+        response.put("isNewUser", user.getCreatedAt().plusSeconds(5).isAfter(Instant.now())); // Usuario creado hace menos de 5 segundos
+
+        AnsiColors.successLog(logger, "Login con Google exitoso para: " + user.getEmail());
+        return ResponseEntity.ok(response);
     }
 }

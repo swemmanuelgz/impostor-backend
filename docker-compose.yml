@@ -48,12 +48,21 @@ services:
       DB_NAME: ${DB_NAME:-impostor}
       DB_USERNAME: ${DB_USERNAME:-impostor_user}
       DB_PASSWORD: ${DB_PASSWORD:-impostor_pass}
-      # JWT (usar variable de entorno o generar uno seguro)
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      # JWT (IMPORTANTE: cambiar en producción)
+      JWT_SECRET: ${JWT_SECRET}
+      # Google OAuth2
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_ANDROID_CLIENT_ID: ${GOOGLE_ANDROID_CLIENT_ID:-}
+      GOOGLE_IOS_CLIENT_ID: ${GOOGLE_IOS_CLIENT_ID:-}
+      # CORS (dominios permitidos, separados por coma)
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECURITY_LOG_LEVEL: ${SECURITY_LOG_LEVEL:-WARN}
       # Spring
       SPRING_PROFILES_ACTIVE: prod
       # JVM
-      JAVA_OPTS: "-Xmx512m -Xms256m -XX:+UseG1GC"
+      JAVA_OPTS: "-Xmx512m -Xms256m -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError"
     ports:
       - "8080:8080"
     networks:
