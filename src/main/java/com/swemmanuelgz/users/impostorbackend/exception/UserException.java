@@ -11,6 +11,7 @@ public class UserException extends RuntimeException {
     public static final String JSON_INVALIDO = "JSON_INVALIDO";
     public static final String EMAIL_INVALIDO = "EMAIL_INVALIDO";
     public static final String USERNAME_INVALIDO = "USERNAME_INVALIDO";
+    public static final String USUARIO_OAUTH = "USUARIO_OAUTH";
 
     private final String codigo;
 
@@ -49,5 +50,9 @@ public class UserException extends RuntimeException {
 
     public static UserException usernameInvalido(String username) {
         return new UserException("El username no es válido: " + username, USERNAME_INVALIDO);
+    }
+
+    public static UserException usuarioOAuth(String provider) {
+        return new UserException("Esta cuenta fue creada con " + provider + ". Por favor, usa el botón de " + provider + " para iniciar sesión.", USUARIO_OAUTH);
     }
 }

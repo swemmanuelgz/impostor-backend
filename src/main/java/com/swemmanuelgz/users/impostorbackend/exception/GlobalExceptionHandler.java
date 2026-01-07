@@ -30,6 +30,9 @@ public class GlobalExceptionHandler {
             case UserException.PASSWORD_INCORRECTO:
                 status = HttpStatus.UNAUTHORIZED;
                 break;
+            case UserException.USUARIO_OAUTH:
+                status = HttpStatus.BAD_REQUEST;  // Usuario OAuth intenta login con contraseña
+                break;
             case UserException.JSON_INVALIDO:
             case UserException.EMAIL_INVALIDO:
             case UserException.USERNAME_INVALIDO:

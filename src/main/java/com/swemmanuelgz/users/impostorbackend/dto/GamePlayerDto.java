@@ -17,6 +17,7 @@ public class GamePlayerDto {
     private Long gameId;
     private Long userId;
     private String username;
+    private String pictureUrl;  // Foto de perfil del usuario (OAuth2)
     private Boolean isImpostor;
     private Boolean isWinner;
     private String word; // Palabra asignada (null si es impostor)
@@ -28,6 +29,7 @@ public class GamePlayerDto {
                 .gameId(gamePlayer.getGame() != null ? gamePlayer.getGame().getId() : null)
                 .userId(gamePlayer.getUser() != null ? gamePlayer.getUser().getId() : null)
                 .username(gamePlayer.getUser() != null ? gamePlayer.getUser().getUsername() : null)
+                .pictureUrl(gamePlayer.getUser() != null ? gamePlayer.getUser().getPictureUrl() : null)
                 .isImpostor(gamePlayer.getIsImpostor())
                 .isWinner(gamePlayer.getIsWinner())
                 .build();

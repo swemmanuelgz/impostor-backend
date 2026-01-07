@@ -52,6 +52,13 @@ public class AuthenticationController {
         
         AnsiColors.infoLog(logger, "Usuario encontrado: " + user.getEmail());
         
+        // Verificar si es usuario OAuth2 (sin contraseña local)
+        if (user.isOAuth2User()) {
+            String provider = user.getAuthProvider() != null ? user.getAuthProvider() : "OAuth";
+            AnsiColors.warningLog(logger, "Usuario OAuth2 intentando login con contraseña: " + username + " (provider: " + provider + ")");
+            throw UserException.usuarioOAuth(provider);
+        }
+        
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
         
         if (!encoder.matches(password, user.getPassword())) {

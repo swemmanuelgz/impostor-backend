@@ -21,6 +21,8 @@ public class UserDto {
     private String email;
     private String password;
     private String fullName;
+    private String pictureUrl;      // Foto de perfil (OAuth2)
+    private String authProvider;    // LOCAL, GOOGLE, etc.
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -38,6 +40,8 @@ public class UserDto {
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .fullName(user.getFullName())
+                .pictureUrl(user.getPictureUrl())
+                .authProvider(user.getAuthProvider())
                 // No exponemos password en el DTO
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
@@ -51,6 +55,8 @@ public class UserDto {
         user.setEmail(this.email);
         user.setPassword(this.password);
         user.setFullName(this.fullName);
+        user.setPictureUrl(this.pictureUrl);
+        user.setAuthProvider(this.authProvider);
         user.setCreatedAt(this.createdAt);
         user.setUpdatedAt(this.updatedAt);
         return user;
