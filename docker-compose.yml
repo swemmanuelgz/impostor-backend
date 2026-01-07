@@ -1,0 +1,76 @@
+# ============================================
+# Docker Compose - Impostor Backend
+# Incluye: Backend + MySQL + Redis (opcional)
+# ============================================
+
+version: '3.8'
+
+services:
+  # ========== MySQL Database ==========
+  mysql:
+    image: mysql:8.0
+    container_name: impostor-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-impostor}
+      MYSQL_USER: ${DB_USERNAME:-impostor_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-impostor_pass}
+      TZ: Europe/Madrid
+    ports:
+      - "3307:3306"  # Puerto externo 3307 para no colisionar con MySQL local
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./src/main/resources/db/migration:/docker-entrypoint-initdb.d:ro
+    networks:
+      - impostor-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ========== Backend API ==========
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: impostor-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # Database
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-impostor}
+      DB_USERNAME: ${DB_USERNAME:-impostor_user}
+      DB_PASSWORD: ${DB_PASSWORD:-impostor_pass}
+      # JWT (usar variable de entorno o generar uno seguro)
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      # Spring
+      SPRING_PROFILES_ACTIVE: prod
+      # JVM
+      JAVA_OPTS: "-Xmx512m -Xms256m -XX:+UseG1GC"
+    ports:
+      - "8080:8080"
+    networks:
+      - impostor-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ========== Networks ==========
+networks:
+  impostor-network:
+    driver: bridge
+
+# ========== Volumes ==========
+volumes:
+  mysql_data:
+    driver: local

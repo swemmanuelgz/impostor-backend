@@ -45,6 +45,7 @@ public class SecurityConfig {
                             .requestMatchers(HttpMethod.OPTIONS,"/**").permitAll()
                             .requestMatchers("/api/auth/login","/api/auth/refresh","/api/auth/signup").permitAll() //todo: revisar permisos
                             .requestMatchers("/chat-socket/**","/topic/**","/app/**","/chat-socket").permitAll() //TODO:REVISAR
+                            .requestMatchers("/actuator/**").permitAll() // Health checks para Docker/K8s
                             .anyRequest().authenticated()
                     ) //aqui se verifica si el usuario está autenticado por JWT
                     .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

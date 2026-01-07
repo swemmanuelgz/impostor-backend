@@ -1,0 +1,53 @@
+# ============================================
+# .dockerignore - Impostor Backend
+# Archivos a excluir del contexto de Docker
+# ============================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.iml
+*.ipr
+*.iws
+
+# Gradle
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Logs
+*.log
+logs/
+
+# Environment files (sensibles)
+spring.env
+*.env
+!.env.example
+
+# Documentación
+*.md
+!README.md
+docs/
+
+# Tests
+src/test/
+
+# Archivos temporales
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
