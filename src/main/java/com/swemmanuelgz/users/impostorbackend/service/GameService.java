@@ -3,10 +3,12 @@ package com.swemmanuelgz.users.impostorbackend.service;
 import com.swemmanuelgz.users.impostorbackend.dto.GameDto;
 import com.swemmanuelgz.users.impostorbackend.dto.GamePlayerDto;
 import com.swemmanuelgz.users.impostorbackend.entity.Game;
+import com.swemmanuelgz.users.impostorbackend.entity.GamePlayer;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public interface GameService {
@@ -41,4 +43,15 @@ public interface GameService {
     // Reconexión
     Optional<GameDto> getActiveGameForUser(Long userId);
     GameDto rejoinGame(String roomCode, Long userId);
+    
+    // ===== SISTEMA DE VOTACIÓN =====
+    void recordVote(Long gameId, Long voterId, Long votedForId);
+    boolean allPlayersVoted(Long gameId);
+    GamePlayer getMostVotedPlayer(Long gameId);
+    Map<Long, Integer> getVoteCounts(Long gameId);
+    void eliminatePlayer(Long gameId, Long userId);
+    boolean checkImpostorWins(Long gameId);
+    boolean checkCitizensWin(Long gameId);
+    List<String> getImpostorNames(Long gameId);
+    void startNewRound(Long gameId);
 }

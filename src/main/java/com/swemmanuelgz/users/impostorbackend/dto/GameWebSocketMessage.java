@@ -80,6 +80,11 @@ public class GameWebSocketMessage {
      */
     private Integer maxPlayers;
     
+    /**
+     * Datos adicionales genéricos (Map flexible para información extra)
+     */
+    private java.util.Map<String, Object> data;
+    
     // ========== Factory Methods para crear mensajes ==========
     
     public static GameWebSocketMessage playerJoined(GameDto game, GamePlayerDto player) {
@@ -193,6 +198,65 @@ public class GameWebSocketMessage {
                 .roomCode(roomCode)
                 .senderId(voterId)
                 .content(String.valueOf(votedUserId))
+                .timestamp(Instant.now())
+                .build();
+    }
+    
+    /**
+     * Crea mensaje de desconexión de jugador con info actualizada del juego
+     * @param game Juego actualizado (puede ser null si el juego fue eliminado)
+     * @param userId ID del jugador desconectado
+     * @param username Nombre del jugador desconectado
+     * @param isHost true si el jugador desconectado es el anfitrión
+     * @param reconnectTimeout segundos restantes para reconexión (0 si no aplica)
+     */
+    public static GameWebSocketMessage playerDisconnected(GameDto game, Long userId, String username, 
+                                                          boolean isHost, int reconnectTimeout) {
+        GameWebSocketMessage.GameWebSocketMessageBuilder builder = GameWebSocketMessage.builder()
+                .type(isHost ? "HOST_DISCONNECTED" : "PLAYER_DISCONNECTED")
+                .senderId(userId)
+                .senderUsername(username)
+                .content(isHost 
+                    ? "El anfitrión " + username + " se ha desconectado. Tiene " + reconnectTimeout + " segundos para reconectarse."
+                    : "El usuario " + username + " se ha desconectado de la partida")
+                .timestamp(Instant.now());
+        
+        if (game != null) {
+            builder.gameId(game.getId())
+                   .roomCode(game.getRoomCode())
+                   .gameData(game)
+                   .currentPlayers(game.getCurrentPlayers())
+                   .maxPlayers(game.getMaxPlayers());
+        }
+        
+        return builder.build();
+    }
+    
+    /**
+     * Crea mensaje cuando el anfitrión se reconecta dentro del tiempo límite
+     */
+    public static GameWebSocketMessage hostReconnected(GameDto game, Long userId, String username) {
+        return GameWebSocketMessage.builder()
+                .type("HOST_RECONNECTED")
+                .gameId(game.getId())
+                .roomCode(game.getRoomCode())
+                .senderId(userId)
+                .senderUsername(username)
+                .gameData(game)
+                .content("El anfitrión " + username + " se ha reconectado")
+                .timestamp(Instant.now())
+                .build();
+    }
+    
+    /**
+     * Crea mensaje cuando expira el tiempo de reconexión del anfitrión
+     */
+    public static GameWebSocketMessage hostTimeoutExpired(String roomCode, String username) {
+        return GameWebSocketMessage.builder()
+                .type("HOST_TIMEOUT_EXPIRED")
+                .roomCode(roomCode)
+                .senderUsername(username)
+                .content("El tiempo de reconexión del anfitrión " + username + " ha expirado. La partida será cancelada.")
                 .timestamp(Instant.now())
                 .build();
     }

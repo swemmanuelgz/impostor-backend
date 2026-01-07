@@ -34,5 +34,18 @@ public class GamePlayer {
     @ColumnDefault("0")
     @Column(name = "is_winner")
     private Boolean isWinner;
+    
+    // ===== CAMPOS PARA SISTEMA DE VOTACIÓN =====
+    
+    @ColumnDefault("0")
+    @Column(name = "has_voted")
+    private Boolean hasVoted = false;
+    
+    @Column(name = "voted_for_id")
+    private Long votedForId;
+    
+    @ColumnDefault("'ACTIVE'")
+    @Column(name = "status", length = 20)
+    private String status = "ACTIVE"; // ACTIVE, ELIMINATED, DISCONNECTED
 
 }

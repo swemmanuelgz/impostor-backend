@@ -188,14 +188,21 @@ public class GameServiceImpl implements GameService {
             throw GameException.jugadorNoEnPartida(userId);
         }
         
-        gamePlayerRepository.deleteByGameIdAndUserId(gameId, userId);
-        AnsiColors.successLog(logger, "Usuario " + userId + " salió de la partida " + gameId);
-        
-        // Si no quedan jugadores, eliminar la partida
-        int remainingPlayers = gamePlayerRepository.countByGameId(gameId);
-        if (remainingPlayers == 0) {
-            gameRepository.deleteById(gameId);
-            AnsiColors.infoLog(logger, "Partida " + gameId + " eliminada por no tener jugadores");
+        // Solo eliminar al jugador si la partida está en WAITING
+        // Si la partida ya inició, mantener al jugador para permitir reconexión
+        if ("WAITING".equals(game.getStatus())) {
+            gamePlayerRepository.deleteByGameIdAndUserId(gameId, userId);
+            AnsiColors.successLog(logger, "Usuario " + userId + " salió de la partida " + gameId + " (partida en espera)");
+            
+            // Si no quedan jugadores, eliminar la partida
+            int remainingPlayers = gamePlayerRepository.countByGameId(gameId);
+            if (remainingPlayers == 0) {
+                gameRepository.deleteById(gameId);
+                AnsiColors.infoLog(logger, "Partida " + gameId + " eliminada por no tener jugadores");
+            }
+        } else {
+            // Partida en curso - el jugador puede reconectarse
+            AnsiColors.infoLog(logger, "Usuario " + userId + " se desconectó de partida en curso " + gameId + " (puede reconectarse)");
         }
     }
 
@@ -243,30 +250,6 @@ public class GameServiceImpl implements GameService {
         gameDto.setWord(word); // La palabra se enviará individualmente a cada jugador
         
         return gameDto;
-    }
-
-    @Override
-    @Transactional
-    public void endGame(Long gameId, boolean impostorWins) {
-        AnsiColors.infoLog(logger, "Finalizando partida " + gameId + ". Impostor gana: " + impostorWins);
-        
-        Game game = gameRepository.findById(gameId)
-                .orElseThrow(() -> GameException.gameNoEncontrado(gameId));
-        
-        List<GamePlayer> players = gamePlayerRepository.findByGameId(gameId);
-        
-        for (GamePlayer player : players) {
-            // Si el impostor gana, solo él es ganador
-            // Si los civiles ganan, todos excepto el impostor son ganadores
-            boolean isWinner = impostorWins ? player.getIsImpostor() : !player.getIsImpostor();
-            player.setIsWinner(isWinner);
-            gamePlayerRepository.save(player);
-        }
-        
-        game.setStatus("FINISHED");
-        gameRepository.save(game);
-        
-        AnsiColors.successLog(logger, "Partida " + gameId + " finalizada");
     }
 
     @Override
@@ -368,5 +351,197 @@ public class GameServiceImpl implements GameService {
         
         List<GamePlayerDto> players = getGamePlayers(game.getId());
         return GameDto.fromEntityWithPlayers(game, players);
+    }
+    
+    // ===== MÉTODOS PARA SISTEMA DE VOTACIÓN =====
+    
+    /**
+     * Registrar el voto de un jugador
+     */
+    @Override
+    @Transactional
+    public void recordVote(Long gameId, Long voterId, Long votedForId) {
+        AnsiColors.infoLog(logger, "Registrando voto: gameId=" + gameId + ", voterId=" + voterId + ", votedForId=" + votedForId);
+        
+        GamePlayer voter = gamePlayerRepository.findByGameIdAndUserId(gameId, voterId)
+                .orElseThrow(() -> new GameException("Votante no encontrado", "VOTER_NOT_FOUND"));
+        
+        // Verificar que no haya votado ya
+        if (Boolean.TRUE.equals(voter.getHasVoted())) {
+            throw new GameException("Ya has votado esta ronda", "ALREADY_VOTED");
+        }
+        
+        // Verificar que está activo
+        if (!"ACTIVE".equals(voter.getStatus())) {
+            throw new GameException("No puedes votar - estás eliminado", "PLAYER_ELIMINATED");
+        }
+        
+        // Registrar voto
+        voter.setHasVoted(true);
+        voter.setVotedForId(votedForId);
+        gamePlayerRepository.save(voter);
+        
+        AnsiColors.successLog(logger, "Voto registrado correctamente");
+    }
+    
+    /**
+     * Verificar si todos los jugadores activos han votado
+     */
+    @Override
+    public boolean allPlayersVoted(Long gameId) {
+        int activePlayers = gamePlayerRepository.countActivePlayers(gameId);
+        int votedPlayers = gamePlayerRepository.countActivePlayersWhoVoted(gameId);
+        
+        AnsiColors.infoLog(logger, "Votos: " + votedPlayers + "/" + activePlayers);
+        
+        return votedPlayers >= activePlayers;
+    }
+    
+    /**
+     * Obtener el jugador más votado
+     */
+    @Override
+    public GamePlayer getMostVotedPlayer(Long gameId) {
+        List<GamePlayer> activePlayers = gamePlayerRepository.findActivePlayersByGameId(gameId);
+        
+        // Contar votos por jugador
+        java.util.Map<Long, Integer> voteCounts = new java.util.HashMap<>();
+        for (GamePlayer player : activePlayers) {
+            if (player.getVotedForId() != null) {
+                voteCounts.merge(player.getVotedForId(), 1, Integer::sum);
+            }
+        }
+        
+        // Encontrar el más votado
+        Long mostVotedUserId = null;
+        int maxVotes = 0;
+        for (java.util.Map.Entry<Long, Integer> entry : voteCounts.entrySet()) {
+            if (entry.getValue() > maxVotes) {
+                maxVotes = entry.getValue();
+                mostVotedUserId = entry.getKey();
+            }
+        }
+        
+        if (mostVotedUserId == null) {
+            throw new GameException("No hay votos registrados", "NO_VOTES");
+        }
+        
+        final Long finalMostVotedUserId = mostVotedUserId;
+        AnsiColors.infoLog(logger, "Jugador más votado: userId=" + mostVotedUserId + " con " + maxVotes + " votos");
+        
+        return activePlayers.stream()
+                .filter(p -> p.getUser().getId().equals(finalMostVotedUserId))
+                .findFirst()
+                .orElseThrow(() -> new GameException("Jugador votado no encontrado", "VOTED_PLAYER_NOT_FOUND"));
+    }
+    
+    /**
+     * Obtener conteo de votos por jugador
+     */
+    @Override
+    public java.util.Map<Long, Integer> getVoteCounts(Long gameId) {
+        List<GamePlayer> activePlayers = gamePlayerRepository.findActivePlayersByGameId(gameId);
+        
+        java.util.Map<Long, Integer> voteCounts = new java.util.HashMap<>();
+        for (GamePlayer player : activePlayers) {
+            if (player.getVotedForId() != null) {
+                voteCounts.merge(player.getVotedForId(), 1, Integer::sum);
+            }
+        }
+        
+        return voteCounts;
+    }
+    
+    /**
+     * Eliminar un jugador (marcarlo como ELIMINATED)
+     */
+    @Override
+    @Transactional
+    public void eliminatePlayer(Long gameId, Long userId) {
+        GamePlayer player = gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
+                .orElseThrow(() -> new GameException("Jugador no encontrado", "PLAYER_NOT_FOUND"));
+        
+        player.setStatus("ELIMINATED");
+        gamePlayerRepository.save(player);
+        
+        AnsiColors.successLog(logger, "Jugador " + userId + " eliminado de la partida " + gameId);
+    }
+    
+    /**
+     * Verificar si los impostores ganan (mayoría o igualdad)
+     */
+    @Override
+    public boolean checkImpostorWins(Long gameId) {
+        int activePlayers = gamePlayerRepository.countActivePlayers(gameId);
+        int activeImpostors = gamePlayerRepository.countActiveImpostors(gameId);
+        int activeCitizens = activePlayers - activeImpostors;
+        
+        // Impostor gana si tiene >= ciudadanos
+        boolean impostorWins = activeImpostors >= activeCitizens;
+        
+        AnsiColors.infoLog(logger, "Check victoria: " + activeImpostors + " impostores vs " + activeCitizens + " ciudadanos → " + 
+            (impostorWins ? "IMPOSTOR GANA" : "Continúa"));
+        
+        return impostorWins;
+    }
+    
+    /**
+     * Verificar si los ciudadanos ganan (no hay impostores activos)
+     */
+    @Override
+    public boolean checkCitizensWin(Long gameId) {
+        int activeImpostors = gamePlayerRepository.countActiveImpostors(gameId);
+        return activeImpostors == 0;
+    }
+    
+    /**
+     * Obtener nombres de los impostores
+     */
+    @Override
+    public List<String> getImpostorNames(Long gameId) {
+        return gamePlayerRepository.findImpostorPlayers(gameId).stream()
+                .map(gp -> gp.getUser().getUsername())
+                .collect(Collectors.toList());
+    }
+    
+    /**
+     * Iniciar nueva ronda (reset votos)
+     */
+    @Override
+    @Transactional
+    public void startNewRound(Long gameId) {
+        List<GamePlayer> activePlayers = gamePlayerRepository.findActivePlayersByGameId(gameId);
+        
+        for (GamePlayer player : activePlayers) {
+            player.setHasVoted(false);
+            player.setVotedForId(null);
+            gamePlayerRepository.save(player);
+        }
+        
+        AnsiColors.successLog(logger, "Nueva ronda iniciada - votos reseteados para partida " + gameId);
+    }
+    
+    /**
+     * Finalizar juego y marcar ganadores
+     */
+    @Override
+    @Transactional
+    public void endGame(Long gameId, boolean impostorWins) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> GameException.gameNoEncontrado(gameId));
+        
+        game.setStatus("FINISHED");
+        gameRepository.save(game);
+        
+        // Marcar ganadores
+        List<GamePlayer> allPlayers = gamePlayerRepository.findByGameId(gameId);
+        for (GamePlayer player : allPlayers) {
+            boolean isWinner = (impostorWins && Boolean.TRUE.equals(player.getIsImpostor())) ||
+                               (!impostorWins && !Boolean.TRUE.equals(player.getIsImpostor()));
+            player.setIsWinner(isWinner);
+            gamePlayerRepository.save(player);
+        }
+        
+        AnsiColors.successLog(logger, "Juego " + gameId + " finalizado. Ganador: " + (impostorWins ? "IMPOSTOR" : "CIUDADANOS"));
     }
 }

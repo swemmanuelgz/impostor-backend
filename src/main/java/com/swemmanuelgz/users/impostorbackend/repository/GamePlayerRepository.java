@@ -48,4 +48,26 @@ public interface GamePlayerRepository extends JpaRepository<GamePlayer, Long> {
     // Reconexión: buscar partida activa más reciente del usuario
     @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.game g JOIN FETCH gp.user WHERE gp.user.id = :userId AND g.status IN ('WAITING', 'IN_PROGRESS', 'VOTING') ORDER BY g.createdAt DESC")
     List<GamePlayer> findActiveGamesByUserId(@Param("userId") Long userId);
+    
+    // ===== QUERIES PARA SISTEMA DE VOTACIÓN =====
+    
+    // Contar jugadores activos que ya votaron
+    @Query("SELECT COUNT(gp) FROM GamePlayer gp WHERE gp.game.id = :gameId AND gp.status = 'ACTIVE' AND gp.hasVoted = true")
+    int countActivePlayersWhoVoted(@Param("gameId") Long gameId);
+    
+    // Contar jugadores activos en el juego
+    @Query("SELECT COUNT(gp) FROM GamePlayer gp WHERE gp.game.id = :gameId AND gp.status = 'ACTIVE'")
+    int countActivePlayers(@Param("gameId") Long gameId);
+    
+    // Contar impostores activos
+    @Query("SELECT COUNT(gp) FROM GamePlayer gp WHERE gp.game.id = :gameId AND gp.status = 'ACTIVE' AND gp.isImpostor = true")
+    int countActiveImpostors(@Param("gameId") Long gameId);
+    
+    // Obtener jugadores activos
+    @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.user WHERE gp.game.id = :gameId AND gp.status = 'ACTIVE'")
+    List<GamePlayer> findActivePlayersByGameId(@Param("gameId") Long gameId);
+    
+    // Obtener impostores activos (para revelar al final)
+    @Query("SELECT gp FROM GamePlayer gp JOIN FETCH gp.user WHERE gp.game.id = :gameId AND gp.isImpostor = true")
+    List<GamePlayer> findImpostorPlayers(@Param("gameId") Long gameId);
 }

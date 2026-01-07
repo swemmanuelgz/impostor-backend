@@ -2,6 +2,7 @@ package com.swemmanuelgz.users.impostorbackend.controller;
 
 import com.swemmanuelgz.users.impostorbackend.dto.*;
 import com.swemmanuelgz.users.impostorbackend.entity.Game;
+import com.swemmanuelgz.users.impostorbackend.entity.GamePlayer;
 import com.swemmanuelgz.users.impostorbackend.exception.GameException;
 import com.swemmanuelgz.users.impostorbackend.exception.WebSocketException;
 import com.swemmanuelgz.users.impostorbackend.repository.UserRepository;
@@ -96,17 +97,58 @@ public class GameWebSocketController {
                     .map(u -> u.getUsername())
                     .orElse("Jugador " + result.userId);
             
-            // Notificar desconexión a la sala con el nombre de usuario
-            GameWebSocketMessage disconnectMsg = GameWebSocketMessage.builder()
-                    .type("PLAYER_DISCONNECTED")
-                    .roomCode(result.roomCode)
-                    .senderId(result.userId)
-                    .senderUsername(username)
-                    .content("El usuario " + username + " se ha desconectado de la partida")
-                    .build();
+            // Obtener el juego para verificar estado y si es anfitrión
+            Game game = gameService.findByRoomCode(result.roomCode).orElse(null);
             
-            messagingTemplate.convertAndSend("/topic/game/" + result.roomCode, disconnectMsg);
-            AnsiColors.infoLog(logger, "Notificada desconexión del jugador " + username + " (" + result.userId + ") a sala " + result.roomCode);
+            if (game != null) {
+                boolean isHost = game.getCreator() != null && game.getCreator().getId().equals(result.userId);
+                String gameStatus = game.getStatus();
+                
+                AnsiColors.infoLog(logger, "Estado del juego: " + gameStatus + ", Es anfitrión: " + isHost);
+                
+                // Si el juego está en WAITING, remover al jugador de la BD
+                if ("WAITING".equals(gameStatus)) {
+                    try {
+                        gameService.leaveGame(game.getId(), result.userId);
+                        AnsiColors.successLog(logger, "Jugador " + username + " removido de la partida en BD");
+                    } catch (Exception e) {
+                        AnsiColors.errorLog(logger, "Error al remover jugador de BD: " + e.getMessage());
+                    }
+                }
+                
+                // Obtener el juego actualizado para enviar a los clientes
+                GameDto updatedGame = null;
+                try {
+                    Game refreshedGame = gameService.findByRoomCode(result.roomCode).orElse(null);
+                    if (refreshedGame != null) {
+                        List<GamePlayerDto> players = gameService.getGamePlayers(refreshedGame.getId());
+                        updatedGame = GameDto.fromEntityWithPlayers(refreshedGame, players);
+                    }
+                } catch (Exception e) {
+                    AnsiColors.warningLog(logger, "No se pudo obtener juego actualizado: " + e.getMessage());
+                }
+                
+                // Calcular timeout de reconexión (solo para anfitrión)
+                int reconnectTimeout = isHost ? GameSessionManager.RECONNECT_TIMEOUT_SECONDS : 0;
+                
+                // Crear mensaje con la nueva factory
+                GameWebSocketMessage disconnectMsg = GameWebSocketMessage.playerDisconnected(
+                    updatedGame, 
+                    result.userId, 
+                    username, 
+                    isHost, 
+                    reconnectTimeout
+                );
+                
+                messagingTemplate.convertAndSend("/topic/game/" + result.roomCode, disconnectMsg);
+                AnsiColors.infoLog(logger, "Notificada desconexión del jugador " + username + 
+                    " (" + result.userId + ") a sala " + result.roomCode + 
+                    (isHost ? " [ANFITRIÓN - " + reconnectTimeout + "s para reconectar]" : ""));
+                
+            } else {
+                // El juego ya no existe, solo loguear
+                AnsiColors.warningLog(logger, "El juego " + result.roomCode + " ya no existe");
+            }
             
             // Si la sala quedó vacía, cerrarla automáticamente
             if (result.roomIsEmpty) {
@@ -268,9 +310,26 @@ public class GameWebSocketController {
             Game game = gameService.findByRoomCode(roomCode)
                     .orElseThrow(() -> WebSocketException.salaNoEncontrada(roomCode));
             
+            // Parsear contenido: formato "PALABRA|IMPOSTOR_COUNT"
+            String content = message.getContent();
+            String word = null;
+            int impostorCount = 1; // Por defecto 1 impostor
+            
+            if (content != null && !content.trim().isEmpty()) {
+                String[] parts = content.split("\\|");
+                word = parts[0].trim();
+                if (parts.length > 1) {
+                    try {
+                        impostorCount = Integer.parseInt(parts[1].trim());
+                    } catch (NumberFormatException e) {
+                        AnsiColors.warningLog(logger, "No se pudo parsear impostorCount, usando 1");
+                    }
+                }
+                AnsiColors.infoLog(logger, "📝 Palabra recibida: " + word + ", Impostores: " + impostorCount);
+            }
+            
             // Generar palabra automáticamente si no se proporciona
-            String word = message.getContent();
-            if (word == null || word.trim().isEmpty()) {
+            if (word == null || word.isEmpty()) {
                 WordGenerator.WordWithCategory generated = wordGenerator.getRandomWordWithCategory();
                 word = generated.word();
                 AnsiColors.infoLog(logger, "📝 Palabra generada automáticamente: " + word + " (categoría: " + generated.category() + ")");
@@ -445,14 +504,147 @@ public class GameWebSocketController {
             }
             
             Long votedUserId = Long.parseLong(message.getContent());
+            Long voterId = message.getSenderId();
             
-            return GameWebSocketMessage.voteCast(game.getId(), roomCode, message.getSenderId(), votedUserId);
+            // ===== REGISTRAR VOTO EN BD =====
+            gameService.recordVote(game.getId(), voterId, votedUserId);
+            
+            // Broadcast del voto
+            GameWebSocketMessage voteMsg = GameWebSocketMessage.voteCast(
+                game.getId(), roomCode, voterId, votedUserId
+            );
+            
+            // ===== VERIFICAR SI TODOS VOTARON =====
+            if (gameService.allPlayersVoted(game.getId())) {
+                AnsiColors.successLog(logger, "¡Todos han votado! Procesando resultados...");
+                
+                // Programar procesamiento de resultados (con pequeño delay para que llegue el último voto)
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(500); // Pequeño delay
+                        processVotingResults(roomCode, game.getId());
+                    } catch (InterruptedException e) {
+                        AnsiColors.errorLog(logger, "Error en thread de procesamiento: " + e.getMessage());
+                    }
+                }).start();
+            }
+            
+            return voteMsg;
             
         } catch (NumberFormatException e) {
             return GameWebSocketMessage.error(null, roomCode, WebSocketException.VOTACION_INVALIDA, 
                 "ID de jugador votado inválido");
         } catch (Exception e) {
+            AnsiColors.errorLog(logger, "Error en votación: " + e.getMessage());
             return GameWebSocketMessage.error(null, roomCode, "ERROR_VOTE", e.getMessage());
+        }
+    }
+    
+    /**
+     * Procesar resultados de votación
+     */
+    private void processVotingResults(String roomCode, Long gameId) {
+        AnsiColors.infoLog(logger, "=== PROCESANDO RESULTADOS DE VOTACIÓN ===");
+        
+        try {
+            // 1. Obtener jugador más votado
+            GamePlayer eliminatedPlayer =
+                gameService.getMostVotedPlayer(gameId);
+            
+            Long eliminatedUserId = eliminatedPlayer.getUser().getId();
+            String eliminatedUsername = eliminatedPlayer.getUser().getUsername();
+            boolean wasImpostor = Boolean.TRUE.equals(eliminatedPlayer.getIsImpostor());
+            
+            // 2. Obtener conteo de votos
+            java.util.Map<Long, Integer> voteCounts = gameService.getVoteCounts(gameId);
+            
+            AnsiColors.infoLog(logger, "Eliminado: " + eliminatedUsername + 
+                " (userId=" + eliminatedUserId + ", wasImpostor=" + wasImpostor + ")");
+            
+            // 3. Broadcast resultado de votación
+            GameWebSocketMessage voteResult = GameWebSocketMessage.builder()
+                    .type("VOTE_RESULT")
+                    .gameId(gameId)
+                    .roomCode(roomCode)
+                    .content(eliminatedUsername)
+                    .senderId(eliminatedUserId)
+                    .data(java.util.Map.of(
+                        "eliminatedUserId", eliminatedUserId,
+                        "eliminatedUsername", eliminatedUsername,
+                        "wasImpostor", wasImpostor,
+                        "voteCounts", voteCounts
+                    ))
+                    .build();
+            
+            messagingTemplate.convertAndSend("/topic/game/" + roomCode, voteResult);
+            
+            // 4. Eliminar al jugador
+            gameService.eliminatePlayer(gameId, eliminatedUserId);
+            
+            // 5. Verificar condiciones de victoria
+            if (wasImpostor && gameService.checkCitizensWin(gameId)) {
+                // Ciudadanos ganan - eliminaron al impostor
+                AnsiColors.successLog(logger, "¡CIUDADANOS GANAN! Impostor eliminado");
+                gameService.endGame(gameId, false);
+                
+                List<String> impostorNames = gameService.getImpostorNames(gameId);
+                
+                GameWebSocketMessage gameEnded = GameWebSocketMessage.builder()
+                        .type("GAME_ENDED")
+                        .gameId(gameId)
+                        .roomCode(roomCode)
+                        .data(java.util.Map.of(
+                            "impostorWins", false,
+                            "impostorNames", impostorNames,
+                            "reason", "IMPOSTOR_ELIMINATED"
+                        ))
+                        .build();
+                
+                messagingTemplate.convertAndSend("/topic/game/" + roomCode, gameEnded);
+                
+            } else if (!wasImpostor && gameService.checkImpostorWins(gameId)) {
+                // Impostor gana - hay mayoría
+                AnsiColors.successLog(logger, "¡IMPOSTOR GANA! Mayoría alcanzada");
+                gameService.endGame(gameId, true);
+                
+                List<String> impostorNames = gameService.getImpostorNames(gameId);
+                
+                GameWebSocketMessage gameEnded = GameWebSocketMessage.builder()
+                        .type("GAME_ENDED")
+                        .gameId(gameId)
+                        .roomCode(roomCode)
+                        .data(java.util.Map.of(
+                            "impostorWins", true,
+                            "impostorNames", impostorNames,
+                            "reason", "IMPOSTOR_MAJORITY"
+                        ))
+                        .build();
+                
+                messagingTemplate.convertAndSend("/topic/game/" + roomCode, gameEnded);
+                
+            } else {
+                // El juego continúa - nueva ronda
+                AnsiColors.infoLog(logger, "El juego continúa - iniciando nueva ronda");
+                gameService.startNewRound(gameId);
+                
+                GameWebSocketMessage newRound = GameWebSocketMessage.builder()
+                        .type("NEW_ROUND")
+                        .gameId(gameId)
+                        .roomCode(roomCode)
+                        .content("Nueva ronda de discusión")
+                        .build();
+                
+                messagingTemplate.convertAndSend("/topic/game/" + roomCode, newRound);
+            }
+            
+        } catch (Exception e) {
+            AnsiColors.errorLog(logger, "Error procesando resultados: " + e.getMessage());
+            e.printStackTrace();
+            
+            GameWebSocketMessage errorMsg = GameWebSocketMessage.error(
+                gameId, roomCode, "ERROR_PROCESSING_VOTES", e.getMessage()
+            );
+            messagingTemplate.convertAndSend("/topic/game/" + roomCode, errorMsg);
         }
     }
 
