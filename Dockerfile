@@ -27,10 +27,6 @@ COPY src src
 # Compilar la aplicación (sin tests para acelerar build)
 RUN ./gradlew bootJar --no-daemon -x test
 
-# Extraer layers del JAR para optimizar capas Docker
-WORKDIR /app/build/libs
-RUN java -Djarmode=tools -jar *.jar extract --layers --destination /app/extracted
-
 # ========== STAGE 2: Runtime ==========
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
@@ -45,15 +41,11 @@ RUN addgroup -g 1001 -S appgroup && \
 
 WORKDIR /application
 
-# Copiar layers extraídas (orden optimizado para cache)
-# Las dependencias cambian menos frecuentemente → primero
-COPY --from=builder /app/extracted/dependencies/ ./
-COPY --from=builder /app/extracted/spring-boot-loader/ ./
-COPY --from=builder /app/extracted/snapshot-dependencies/ ./
-COPY --from=builder /app/extracted/application/ ./
+# Copiar el JAR compilado
+COPY --from=builder /app/build/libs/*.jar application.jar
 
 # Cambiar ownership al usuario no-root
-RUN chown -R appuser:appgroup /application
+RUN chown appuser:appgroup application.jar
 
 # Usar usuario no-root
 USER appuser
@@ -70,5 +62,5 @@ ENV JAVA_OPTS="-Xmx512m -Xms256m" \
     SPRING_PROFILES_ACTIVE="prod" \
     TZ="Europe/Madrid"
 
-# Comando de inicio
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar application.jar"]
+# Comando de inicio - usar el launcher de Spring Boot
+ENTRYPOINT exec java $JAVA_OPTS -jar application.jar
